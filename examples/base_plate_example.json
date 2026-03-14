@@ -1,0 +1,15 @@
+{
+  "part_type": "base_plate",
+  "parameters": {
+    "material": "aluminum",
+    "thickness": 12.0,
+    "length": 200.0,
+    "width": 100.0,
+    "hole_pattern": "rectangular",
+    "hole_diameter": 10.0,
+    "hole_spacing_x": 60.0,
+    "hole_spacing_y": 40.0,
+    "edge_distance": 30.0
+  },
+  "export_formats": ["dxf", "svg"]
+}

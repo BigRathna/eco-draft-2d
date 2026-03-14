@@ -1,0 +1,10 @@
+{
+  "part_type": "washer",
+  "parameters": {
+    "material": "steel",
+    "thickness": 2.0,
+    "outer_diameter": 30.0,
+    "inner_diameter": 10.0
+  },
+  "export_formats": ["dxf"]
+}

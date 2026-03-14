@@ -1,0 +1,13 @@
+{
+  "part_type": "gusset",
+  "parameters": {
+    "material": "steel",
+    "thickness": 8.0,
+    "width": 120.0,
+    "height": 120.0,
+    "corner_radius": 6.0,
+    "hole_diameter": 16.0,
+    "chamfer_size": 2.0
+  },
+  "export_formats": ["dxf", "svg"]
+}

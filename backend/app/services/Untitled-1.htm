@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Sabhapathy Family Subtree</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/treant-js/1.0/Treant.css">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+
+    .node {
+      border: 2px solid #555;
+      border-radius: 8px;
+      padding: 10px;
+      background-color: #e0f7fa;
+      color: #000;
+      text-align: center;
+      width: 220px;
+    }
+
+    .node.level-1 {
+      background-color: #b2ebf2;
+      font-weight: bold;
+    }
+
+    .node.level-2 {
+      background-color: #80deea;
+    }
+
+    .node.level-3 {
+      background-color: #4dd0e1;
+    }
+
+    .node.level-4 {
+      background-color: #26c6da;
+    }
+
+    #tree-container {
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+  </style>
+</head>
+
+<body>
+
+  <h2>Badha Family Subtree – Sabhapathy Line</h2>
+  <div id="tree-container">
+    <div id="tree-simple"></div>
+  </div>
+
+  <!-- Treant Dependencies -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/raphael/2.3.0/raphael.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/treant-js/1.0/Treant.min.js"></script>
+
+  <script>
+    var tree_config = {
+      chart: {
+        container: "#tree-simple",
+        rootOrientation: "NORTH",
+        node: {
+          HTMLclass: "node"
+        },
+        connectors: {
+          type: "step"
+        },
+        animation: {
+          nodeAnimation: "easeOutBounce",
+          nodeSpeed: 500,
+          connectorsAnimation: "bounce",
+          connectorsSpeed: 500
+        },
+        levelSeparation: 40,
+        siblingSeparation: 20
+      },
+      nodeStructure: {
+        text: { name: "Late Badha Narasimha" },
+        HTMLclass: "node level-1",
+        children: [
+          {
+            text: { name: "Late Badha Lingaiah (Second Wife)" },
+            HTMLclass: "node level-2",
+            children: [
+              {
+                text: { name: "Late Badha Sabhapathy" },
+                HTMLclass: "node level-3",
+                children: [
+                  {
+                    text: { name: "Late Badha Sathyanarayana" },
+                    HTMLclass: "node level-4",
+                    children: [
+                      {
+                        text: { name: "Badha Suryalaxmi" },
+                        HTMLclass: "node level-5"
+                      },
+                      {
+                        text: { name: "Badha Sreenivas" },
+                        HTMLclass: "node level-5"
+                      },
+                      {
+                        text: { name: "Badha Saibol" },
+                        HTMLclass: "node level-5"
+                      },
+                      {
+                        text: { name: "Badha Omshivkumar" },
+                        HTMLclass: "node level-5"
+                      }
+                    ]
+                  },
+                  {
+                    text: { name: "Late Badha Seethapathy" },
+                    HTMLclass: "node level-4",
+                    children: [
+                      {
+                        text: { name: "Badha Ravikiran" },
+                        HTMLclass: "node level-5"
+                      },
+                      {
+                        text: { name: "Badha Kalyani" },
+                        HTMLclass: "node level-5"
+                      },
+                      {
+                        text: { name: "Badha Mira Shashikiran" },
+                        HTMLclass: "node level-5"
+                      },
+                      {
+                        text: { name: "Late Badha Vani" },
+                        HTMLclass: "node level-5"
+                      }
+                    ]
+                  },
+                  {
+                    text: { name: "Badha Ganesh" },
+                    HTMLclass: "node level-4",
+                    children: [
+                      {
+                        text: { name: "Badha Swarna Jothi" },
+                        HTMLclass: "node level-5"
+                      },
+                      {
+                        text: { name: "Badha Swapna Jothi" },
+                        HTMLclass: "node level-5"
+                      },
+                      {
+                        text: { name: "Badha Kalyan Chakravathi" },
+                        HTMLclass: "node level-5"
+                      }
+                    ]
+                  },
+                  {
+                    text: { name: "Badha Venugopal" },
+                    HTMLclass: "node level-4",
+                    children: [
+                      {
+                        text: { name: "Badha Vajra Sabhapathy" },
+                        HTMLclass: "node level-5"
+                      },
+                      {
+                        text: { name: "Badha Savitha Bhargavi" },
+                        HTMLclass: "node level-5"
+                      },
+                      {
+                        text: { name: "Badha Rathna Sabhapathy" },
+                        HTMLclass: "node level-5"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    };
+
+    new Treant(tree_config);
+  </script>
+
+</body>
+
+</html>
