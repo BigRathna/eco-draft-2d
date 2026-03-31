@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
     debug: bool = False
     gemini_api_key: str = ""
+    enable_lca: bool = False
 
     # CORS settings
     backend_cors_origins: list[str] = [

@@ -4,16 +4,19 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { TrendingUp, Play, RefreshCw } from 'lucide-react'
 import { ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient, queryKeys, OptimizationPoint } from '@/lib/api'
 import { toast } from 'sonner'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { getCurrentPart } from '@/lib/nlp'
 
 interface ParetoChartProps {
   className?: string
+  trigger?: number
+  onApplySolution?: (intent: string) => void
 }
 
-export function ParetoChart({ className = '' }: ParetoChartProps) {
+export function ParetoChart({ className = '', trigger = 0, onApplySolution }: ParetoChartProps) {
   const [selectedPoint, setSelectedPoint] = useState<OptimizationPoint | null>(null)
 
   const {
@@ -22,15 +25,26 @@ export function ParetoChart({ className = '' }: ParetoChartProps) {
     error: optimizationError
   } = useQuery({
     queryKey: queryKeys.optimization,
-    queryFn: () => apiClient.runOptimization(['mass', 'cost']),
+    queryFn: () => {
+      const part = getCurrentPart();
+      if (!part) throw new Error('No part context available for optimization');
+      return apiClient.runOptimization(part.part_type, part.parameters, ['mass', 'cost'])
+    },
     enabled: false, // Don't auto-run, only when triggered
     refetchOnWindowFocus: false,
     retry: 1
   })
 
+  const queryClient = useQueryClient()
+
   const runOptimizationMutation = useMutation({
-    mutationFn: (objectives: string[] = ['mass', 'cost']) => apiClient.runOptimization(objectives),
+    mutationFn: (objectives: string[] = ['mass', 'cost']) => {
+      const part = getCurrentPart();
+      if (!part) throw new Error('No part context to optimize');
+      return apiClient.runOptimization(part.part_type, part.parameters, objectives);
+    },
     onSuccess: (data) => {
+      queryClient.setQueryData(queryKeys.optimization, data)
       toast.success(`Found ${data.points.length} optimization solutions`)
     },
     onError: (error) => {
@@ -41,6 +55,13 @@ export function ParetoChart({ className = '' }: ParetoChartProps) {
   const handleRunOptimization = () => {
     runOptimizationMutation.mutate(['mass', 'cost'])
   }
+
+  // Refetch when trigger changes (button clicked from parent action)
+  useEffect(() => {
+    if (trigger > 0) {
+      handleRunOptimization()
+    }
+  }, [trigger])
 
   // Prepare data for scatter plot
   const chartData = optimizationData?.points.map((point, index) => ({
@@ -137,7 +158,7 @@ export function ParetoChart({ className = '' }: ParetoChartProps) {
                     dataKey="x"
                     name="Mass"
                     unit="kg"
-                    domain={['dataMin - 0.1', 'dataMax + 0.1']}
+                    domain={['auto', 'auto']}
                     tick={{ fontSize: 12 }}
                     label={{ value: 'Mass (kg)', position: 'insideBottom', offset: -10 }}
                   />
@@ -146,7 +167,7 @@ export function ParetoChart({ className = '' }: ParetoChartProps) {
                     dataKey="y"
                     name="Cost"
                     unit="$"
-                    domain={['dataMin - 1', 'dataMax + 1']}
+                    domain={['auto', 'auto']}
                     tick={{ fontSize: 12 }}
                     label={{ value: 'Cost ($)', angle: -90, position: 'insideLeft' }}
                   />
@@ -223,7 +244,11 @@ export function ParetoChart({ className = '' }: ParetoChartProps) {
                   variant="outline"
                   size="sm"
                   className="w-full mt-2"
-                  onClick={() => setSelectedPoint(null)}
+                  onClick={() => {
+                    const intentStr = `Change the parameters to: ${Object.entries(selectedPoint.parameters).map(([k,v]) => `${k}=${v}`).join(', ')}`;
+                    onApplySolution?.(intentStr);
+                    setSelectedPoint(null);
+                  }}
                 >
                   Apply This Solution
                 </Button>

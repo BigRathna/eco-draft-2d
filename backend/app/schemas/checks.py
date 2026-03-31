@@ -4,6 +4,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 from .common import ManufacturingProcess, ValidationResult
+from .cad import PartGeometry
 
 
 class ManufacturabilityCheckRequest(BaseModel):
@@ -12,6 +13,7 @@ class ManufacturabilityCheckRequest(BaseModel):
     geometry_data: dict = Field(..., description="Geometry data (from part generation)")
     manufacturing_process: ManufacturingProcess = Field(..., description="Manufacturing process to validate against")
     thickness: float = Field(..., description="Part thickness in mm", gt=0)
+    part_geometry: Optional[PartGeometry] = Field(None, description="Structured part geometry")
     
 
 class CheckResult(BaseModel):

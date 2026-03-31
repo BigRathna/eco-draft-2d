@@ -231,3 +231,6 @@ htmlcov/
 .idea/
 *.swp
 *.swo
+masterplan.md
+plan.md
+.gitignore

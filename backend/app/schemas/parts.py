@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field, validator
 
 from .common import Material, FileFormat, GeometryInfo, Point2D
+from .checks import ManufacturabilityCheckResponse
 
 
 class BasePartParams(BaseModel, ABC):
@@ -73,6 +74,7 @@ class GeneratedPart(BaseModel):
     """Information about a generated part."""
     part_type: str = Field(..., description="Type of part")
     geometry_info: GeometryInfo = Field(..., description="Geometric properties")
+    geometry_data: Dict[str, Any] = Field(default_factory=dict, description="Raw geometric generation data")
     material: Material = Field(..., description="Part material")
     thickness: float = Field(..., description="Part thickness in mm")
     mass: float = Field(..., description="Part mass in kg")
@@ -91,3 +93,4 @@ class PartGenerateResponse(BaseModel):
     part: GeneratedPart = Field(..., description="Generated part information")
     files: List[ExportFile] = Field(..., description="Exported files")
     generation_time_ms: float = Field(..., description="Time taken to generate part in milliseconds")
+    checks: Optional[ManufacturabilityCheckResponse] = Field(None, description="Manufacturability check results")

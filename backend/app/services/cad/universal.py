@@ -11,8 +11,10 @@ from typing import Dict, Any, List, Tuple, Union
 from shapely.geometry import Polygon, Point
 from shapely.ops import unary_union
 import numpy as np
+import uuid
 
 from app.schemas.parts import BasePartParams
+from app.schemas.cad import PartGeometry, HoleFeature, Point2D
 
 
 class UniversalPartGenerator:
@@ -134,8 +136,28 @@ class UniversalPartGenerator:
         
         return defaults_map.get(self.part_type, {})
     
-    def generate_geometry(self) -> Tuple[Polygon, Dict[str, Any]]:
+    def _snap_parameters(self):
+        """Enforce basic structural constraints dynamically."""
+        width = self.params.get("width", 100.0)
+        height = self.params.get("height", 100.0)
+        thickness = self.params.get("thickness", 5.0)
+        hole_dia = self.params.get("hole_diameter", 0.0)
+        
+        if thickness < 0.5:
+            self.params["thickness"] = 0.5
+            
+        if hole_dia > 0:
+            min_dim = min(width, height)
+            # Prevent hole from intersecting external boundary (allow 20% margin)
+            if hole_dia > min_dim * 0.8:
+                self.params["hole_diameter"] = min_dim * 0.8
+            # Hardware limitation for kerfs 
+            elif hole_dia < 2.0:
+                self.params["hole_diameter"] = 2.0
+
+    def generate_geometry(self) -> Tuple[Polygon, Dict[str, Any], PartGeometry]:
         """Generate the 2D geometry for the part."""
+        self._snap_parameters()
         shape_type = self.params.get("shape", "rectangle")
         
         # Generate base shape
@@ -163,7 +185,40 @@ class UniversalPartGenerator:
         # Calculate geometry data
         geometry_data = self._calculate_geometry_data(geometry)
         
-        return geometry, geometry_data
+        # Build standard PartGeometry schema
+        part_geometry = self._build_part_geometry_schema(geometry, geometry_data)
+        
+        return geometry, geometry_data, part_geometry
+
+    def _build_part_geometry_schema(self, geometry: Polygon, geometry_data: Dict[str, Any]) -> PartGeometry:
+        """Create a PartGeometry validation schema from the generated data."""
+        material = self.params.get("material", "steel")
+        thickness = self.params.get("thickness", 5.0)
+        
+        outer_boundary = []
+        if "outline_coords" in geometry_data and geometry_data["outline_coords"]:
+            outer_boundary = [Point2D(x=float(pt[0]), y=float(pt[1])) for pt in geometry_data["outline_coords"]]
+            
+        holes = []
+        hole_diameter = self.params.get("hole_diameter", 8.0)
+        
+        # We need to extract hole centers. If we don't have them in geometry_data["hole_centers"],
+        # we can estimate them from interior rings' centroids.
+        if hasattr(geometry, 'interiors'):
+            for i, interior in enumerate(geometry.interiors):
+                centroid = Polygon(interior).centroid
+                holes.append(HoleFeature(
+                    id=f"hole_{i}",
+                    center=Point2D(x=float(centroid.x), y=float(centroid.y)),
+                    diameter=float(hole_diameter) # simplistic, assumes all holes are the same diameter
+                ))
+                
+        return PartGeometry(
+            outer_boundary=outer_boundary,
+            holes=holes,
+            material=material,
+            thickness=float(thickness)
+        )
     
     def _create_rectangle(self) -> Polygon:
         """Create a rectangular geometry."""

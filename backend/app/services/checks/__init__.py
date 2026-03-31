@@ -1,5 +1,6 @@
 """Manufacturability check services."""
 
-from .manufacturability import ManufacturabilityChecker
+from .engine import CheckEngine
+from .rules import ManufacturabilityRule
 
-__all__ = ["ManufacturabilityChecker"]
+__all__ = ["CheckEngine", "ManufacturabilityRule"]

@@ -6,10 +6,10 @@ import { Input } from '@/components/ui/input'
 import { Card } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
-import { Send, Bot, User, Download, Zap, CheckCircle, BarChart3 } from 'lucide-react'
+import { Send, Bot, User, Download, Zap, CheckCircle, BarChart3, Paperclip } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
-import { useMutation } from '@tanstack/react-query'
-import { apiClient, PartGenerateRequest } from '@/lib/api'
+import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
+import { apiClient, PartGenerateRequest, queryKeys } from '@/lib/api'
 import { parseChatMessage, addToHistory, setCurrentPart, clearConversationHistory, getCurrentPart } from '@/lib/nlp'
 import { toast } from 'sonner'
 import { useEngineering } from '@/lib/engineeringContext'
@@ -33,19 +33,24 @@ export interface ChatAction {
 interface ChatProps {
   onSvgUpdate?: (svg: string) => void
   onActionTrigger?: (action: ChatAction) => void
+  externalIntent?: string
 }
 
 function getTimeString(date: Date) {
   return date.toLocaleTimeString();
 }
 
-export function Chat({ onSvgUpdate, onActionTrigger }: ChatProps) {
+export function Chat({ onSvgUpdate, onActionTrigger, externalIntent }: ChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('')
+  const [selectedMaterial, setSelectedMaterial] = useState('auto')
+  const [selectedLlm, setSelectedLlm] = useState('gemini')
+  const queryClient = useQueryClient()
   const [timeStrings, setTimeStrings] = useState<string[]>([]);
   const [showModificationHint, setShowModificationHint] = useState(false)
   const [lastParsedParameters, setLastParsedParameters] = useState<any>(null)
   const scrollAreaRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const { setEngineeringData } = useEngineering();
 
   // Set initial chat state only on client
@@ -107,6 +112,74 @@ export function Chat({ onSvgUpdate, onActionTrigger }: ChatProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.length]);
 
+  const uploadDxfMutation = useMutation({
+    mutationFn: (file: File) => apiClient.uploadDxf(file),
+    onSuccess: (data) => {
+      console.log('DXF import successful, data received:', data);
+      
+      const svgFile = data.files?.find((f: any) => f.format === 'svg');
+      const svg = svgFile ? atob(svgFile.content_base64) : '';
+      
+      const formatPartType = (partType: string) => {
+        let formatted = partType.replace(/^[a-z]_/, '').replace(/_/g, ' ').replace(/-/g, ' ');
+        return formatted.split(' ').map(word => 
+          word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+        ).join(' ');
+      };
+      
+      const assistantMessage: ChatMessage = {
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: `✅ **DXF Imported Successfully**\n\nI've imported your ${formatPartType(data.part.part_type)} design and added it to the session. The 2D outline is now displayed in the canvas.`,
+        timestamp: new Date(),
+        svg: svg,
+        actions: [
+          { id: 'check-manufacturability', label: 'Check Manufacturability', type: 'check' },
+          { id: 'analyze-stress', label: 'Analyze Stress', type: 'analyze' },
+          { id: 'optimize-design', label: 'Optimize Design', type: 'optimize' },
+          { id: 'export-pdf', label: 'Export PDF', type: 'export' }
+        ]
+      }
+      
+      setMessages(prev => [...prev, assistantMessage])
+      
+      if (svg && onSvgUpdate) {
+        onSvgUpdate(svg)
+      }
+      
+      if (data.part?.geometry_data) {
+        setEngineeringData({
+          geometryData: data.part.geometry_data
+        });
+      }
+      
+      queryClient.invalidateQueries({ queryKey: queryKeys.sessionGraph })
+      toast.success('DXF file imported successfully')
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to import DXF file')
+    }
+  });
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    const userMsg: ChatMessage = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: `Uploaded DXF file: \`${file.name}\``,
+      timestamp: new Date()
+    }
+    setMessages(prev => [...prev, userMsg])
+    
+    uploadDxfMutation.mutate(file);
+    
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }
+
   const generatePartMutation = useMutation({
     mutationFn: (request: PartGenerateRequest) => apiClient.generatePart(request),
     onSuccess: (data) => {
@@ -130,6 +203,9 @@ export function Chat({ onSvgUpdate, onActionTrigger }: ChatProps) {
         return formatted;
       };
       
+      // Extract DXF
+      const dxfFile = data.files?.find(f => f.format === 'dxf');
+
       // Add assistant response
       const assistantMessage: ChatMessage = {
         id: Date.now().toString(),
@@ -141,7 +217,8 @@ export function Chat({ onSvgUpdate, onActionTrigger }: ChatProps) {
           { id: 'check-manufacturability', label: 'Check Manufacturability', type: 'check' },
           { id: 'analyze-stress', label: 'Analyze Stress', type: 'analyze' },
           { id: 'optimize-design', label: 'Optimize Design', type: 'optimize' },
-          { id: 'export-pdf', label: 'Export PDF', type: 'export' }
+          { id: 'export-pdf', label: 'Export PDF', type: 'export' },
+          { id: 'export-dxf', label: 'Download DXF', type: 'export', payload: { format: 'dxf', content: dxfFile?.content_base64 } }
         ]
       }
       setMessages(prev => [...prev, assistantMessage])
@@ -149,7 +226,7 @@ export function Chat({ onSvgUpdate, onActionTrigger }: ChatProps) {
       // Update engineering context with geometry, material, thickness, etc.
       setEngineeringData({
         partType: data.part.part_type,
-        geometryData: data.part.geometry_info || {},
+        geometryData: data.part.geometry_data || {},
         material: {
           name: data.part.material,
           youngs_modulus: 200000, // MPa  
@@ -187,6 +264,11 @@ export function Chat({ onSvgUpdate, onActionTrigger }: ChatProps) {
         console.warn('Cannot update SVG:', { hasCallback: !!onSvgUpdate, hasSvg: !!svg });
       }
 
+      // Invalidate existing analytical queries so they fetch the newly generated geometry data
+      queryClient.invalidateQueries({ queryKey: queryKeys.partAnalysis })
+      queryClient.invalidateQueries({ queryKey: queryKeys.partLCA })
+      queryClient.invalidateQueries({ queryKey: ['sessionGraph'] })
+
       toast.success('Part generated successfully!')
     },
     onError: (error) => {
@@ -217,13 +299,26 @@ export function Chat({ onSvgUpdate, onActionTrigger }: ChatProps) {
     }
   })
 
-  const handleSendMessage = async () => {
-    if (!input.trim()) return
+  // Effect to handle external intents (e.g., from Pareto optimization)
+  useEffect(() => {
+    if (externalIntent) {
+      handleSendMessage(externalIntent);
+    }
+  }, [externalIntent]);
+
+  const handleSendMessage = async (customMessage?: string) => {
+    const messageText = customMessage || input.trim();
+    if (!messageText || generatePartMutation.isPending) return
+    
+    // Clear input immediately if using the input field
+    if (!customMessage) {
+      setInput('')
+    }
 
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
       role: 'user',
-      content: input,
+      content: messageText,
       timestamp: new Date()
     }
     setMessages(prev => [...prev, userMessage])
@@ -233,8 +328,12 @@ export function Chat({ onSvgUpdate, onActionTrigger }: ChatProps) {
       // Add to conversation history
       addToHistory(input.trim())
       
-      // Parse the user message using NLP/LLM
-      const parsed = await parseChatMessage(input.trim())
+      // Parse the user message using NLP/LLM, appending material if set
+      let promptToParse = messageText;
+      if (selectedMaterial !== 'auto') {
+         promptToParse += `. The material MUST be ${selectedMaterial}.`;
+      }
+      const parsed = await parseChatMessage(promptToParse, selectedLlm)
       
       console.log('Parsed message:', parsed);
       
@@ -248,11 +347,42 @@ export function Chat({ onSvgUpdate, onActionTrigger }: ChatProps) {
       // Update current part context
       setCurrentPart(parsed.part_type, parsed.parameters)
       
+      if (parsed.action === 'checkout' && parsed.cached_data) {
+        toast.success(`Checked out ${parsed.part_type} (v${parsed.cached_data.version})`)
+        const svgContent = parsed.cached_data.svg ? atob(parsed.cached_data.svg) : '';
+        const assistantMessage: ChatMessage = {
+          id: Date.now().toString(),
+          role: 'assistant',
+          content: `✅ **Restored Design Version ${parsed.cached_data.version}**\n\nThe graphical parameters have been instantly checked out from the internal tree.\n\n**Material:** ${parsed.cached_data.material}\n**Thickness:** ${parsed.cached_data.thickness}mm`,
+          timestamp: new Date(),
+          svg: svgContent,
+          actions: [
+            { id: 'check-manufacturability', label: 'Check Manufacturability', type: 'check' },
+            { id: 'analyze-stress', label: 'Analyze Stress', type: 'analyze' },
+            { id: 'optimize-design', label: 'Optimize Design', type: 'optimize' },
+            { id: 'export-pdf', label: 'Export PDF', type: 'export' }
+          ]
+        }
+        setMessages(prev => [...prev, assistantMessage])
+        
+        if (onSvgUpdate && svgContent) {
+          onSvgUpdate(svgContent)
+        }
+        
+        setEngineeringData({
+          partType: parsed.part_type,
+          parameters: parsed.parameters,
+        })
+        
+        queryClient.invalidateQueries({ queryKey: ['sessionGraph'] });
+        return;
+      }
+      
       // Generate part using parsed parameters
       const requestData = {
         part_type: parsed.part_type,
         parameters: parsed.parameters,
-        export_formats: parsed.export_formats || ['svg', 'dxf']
+        export_formats: ['svg', 'dxf']
       };
       console.log('Generating part with data:', requestData);
       generatePartMutation.mutate(requestData)
@@ -432,6 +562,20 @@ export function Chat({ onSvgUpdate, onActionTrigger }: ChatProps) {
               </Card>
             </div>
           )}
+
+          {uploadDxfMutation.isPending && (
+            <div className="flex gap-3">
+              <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center">
+                <Bot className="w-4 h-4 text-secondary-foreground animate-pulse" />
+              </div>
+              <Card className="p-3">
+                <div className="flex items-center gap-2">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
+                  <span className="text-sm text-muted-foreground">Importing DXF File...</span>
+                </div>
+              </Card>
+            </div>
+          )}
           </div>
         </div>
       </ScrollArea>
@@ -444,17 +588,55 @@ export function Chat({ onSvgUpdate, onActionTrigger }: ChatProps) {
             💡 Tip: I'll modify your current part. Try: "make it 20% bigger" or "increase thickness to 8mm"
           </div>
         )}
+        
         <div className="flex gap-2">
+          <select
+            className="flex h-10 w-[120px] items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+            value={selectedMaterial}
+            onChange={(e) => setSelectedMaterial(e.target.value)}
+            disabled={generatePartMutation.isPending}
+          >
+            <option value="auto">Auto Material</option>
+            <option value="steel">Steel</option>
+            <option value="aluminum">Aluminum</option>
+            <option value="stainless_steel">Stainless Steel</option>
+          </select>
+          <select
+            className="flex h-10 w-[120px] items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+            value={selectedLlm}
+            onChange={(e) => setSelectedLlm(e.target.value)}
+            disabled={generatePartMutation.isPending}
+          >
+            <option value="gemini">Gemini</option>
+            <option value="ollama">Ollama</option>
+            <option value="openrouter">OpenRouter</option>
+          </select>
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            className="hidden" 
+            accept=".dxf" 
+            onChange={handleFileUpload} 
+          />
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={generatePartMutation.isPending || uploadDxfMutation.isPending}
+            title="Upload DXF file"
+          >
+            <Paperclip className="w-4 h-4" />
+          </Button>
           <Input
             value={input}
             onChange={handleInputChange}
             onKeyPress={handleKeyPress}
             placeholder="Describe the part you want to create..."
-            disabled={generatePartMutation.isPending}
+            disabled={generatePartMutation.isPending || uploadDxfMutation.isPending}
           />
           <Button
-            onClick={handleSendMessage}
-            disabled={!input.trim() || generatePartMutation.isPending}
+            onClick={() => handleSendMessage()}
+            disabled={!input.trim() || generatePartMutation.isPending || uploadDxfMutation.isPending}
           >
             <Send className="w-4 h-4" />
           </Button>

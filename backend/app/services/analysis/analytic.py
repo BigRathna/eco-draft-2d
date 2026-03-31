@@ -87,8 +87,9 @@ class AnalyticAnalyzer:
         
         # Calculate safety factors
         yield_strength = self.material_props.get("yield_strength", 250e6)
+        yield_strength_mpa = yield_strength / 1e6
         MAX_SAFETY_FACTOR = 1e6  # Large finite number instead of infinity
-        safety_factor = yield_strength / max_stress if max_stress > 0 else MAX_SAFETY_FACTOR
+        safety_factor = yield_strength_mpa / max_stress if max_stress > 0 else MAX_SAFETY_FACTOR
         margin_of_safety = safety_factor - 1.0
         
         # Determine if stress levels are acceptable (safety factor > 2.0)
@@ -96,7 +97,13 @@ class AnalyticAnalyzer:
         
         # Find stress location (simplified - assume at centroid)
         centroid_data = geometry_data.get("centroid", {"x": 0, "y": 0})
-        stress_location = Point2D(x=centroid_data["x"], y=centroid_data["y"])
+        if isinstance(centroid_data, dict):
+            cx = centroid_data.get("x", 0)
+            cy = centroid_data.get("y", 0)
+        else:
+            cx = centroid_data.x
+            cy = centroid_data.y
+        stress_location = Point2D(x=cx, y=cy)
         
         return StressResult(
             load_case_name=load_case.name,
@@ -139,9 +146,15 @@ class AnalyticAnalyzer:
             return 0.0
             
         # Calculate section modulus (simplified rectangular approximation)
-        bounds = geometry_data.get("bounds", [0, 0, 100, 100])
-        width = bounds[2] - bounds[0]  # x-direction
-        height = bounds[3] - bounds[1]  # y-direction
+        bounding_box = geometry_data.get("bounding_box")
+        if bounding_box and len(bounding_box) == 2:
+            min_pt, max_pt = bounding_box
+            width = max_pt["x"] - min_pt["x"] if isinstance(max_pt, dict) else max_pt.x - min_pt.x
+            height = max_pt["y"] - min_pt["y"] if isinstance(max_pt, dict) else max_pt.y - min_pt.y
+        else:
+            bounds = geometry_data.get("bounds", [0, 0, 100, 100])
+            width = bounds[2] - bounds[0]  # x-direction
+            height = bounds[3] - bounds[1]  # y-direction
         
         thickness = self.request.thickness
         
@@ -183,7 +196,8 @@ class AnalyticAnalyzer:
             ])
             
         # Net section recommendations
-        high_net_stress_cases = [r for r in results if r.net_section_stress > 0.6 * self.material_props.get("yield_strength", 250e6)]
+        yield_mpa = self.material_props.get("yield_strength", 250e6) / 1e6
+        high_net_stress_cases = [r for r in results if r.net_section_stress > 0.6 * yield_mpa]
         if high_net_stress_cases:
             recommendations.append("High net section stress detected - consider larger cross-section or fewer/smaller holes")
             

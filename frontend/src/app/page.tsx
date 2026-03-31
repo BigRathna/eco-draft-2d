@@ -11,8 +11,11 @@ import { Checks } from '@/components/Checks'
 import { Analysis } from '@/components/Analysis'
 import { LCA } from '@/components/LCA'
 import { ParetoChart } from '@/components/ParetoChart'
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { apiClient } from '@/lib/api'
 import { toast } from 'sonner'
+import { useEngineering } from '@/lib/engineeringContext'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 
 export default function Home() {
   const { theme, setTheme } = useTheme()
@@ -22,6 +25,76 @@ export default function Home() {
   const [triggerCheck, setTriggerCheck] = useState(0)
   const [triggerAnalysis, setTriggerAnalysis] = useState(0)
   const [triggerOptimization, setTriggerOptimization] = useState(0)
+  const [externalIntent, setExternalIntent] = useState<string>('')
+  
+  const { partType, geometryData, material, thickness, setEngineeringData } = useEngineering()
+  const queryClient = useQueryClient()
+
+  const { data: sessionData } = useQuery({
+    queryKey: ['sessionGraph'],
+    queryFn: () => apiClient.getSessionGraph()
+  })
+
+  const checkoutMutation = useMutation({
+    mutationFn: (version: string) => apiClient.checkoutVersion(version),
+    onSuccess: (data) => {
+      const parsed = data;
+      toast.success(`Checked out ${parsed.part_type} (v${parsed.cached_data.version})`);
+      
+      const svgContent = parsed.cached_data.svg ? atob(parsed.cached_data.svg) : '';
+      setCurrentSvg(svgContent);
+      setEngineeringData({
+        partType: parsed.part_type,
+        parameters: parsed.parameters,
+        geometryData: parsed.geometry_data,
+      });
+      queryClient.invalidateQueries({ queryKey: ['sessionGraph'] });
+    }
+  });
+
+  const renderVersionDropdown = () => {
+    const historicalVersions = (sessionData?.events || [])
+      .filter((e: any) => e.action_type === "GENERATE")
+      .map((e: any) => ({
+        version: e.version,
+        name: e.parameters?.part_type || 'Part'
+      })).reverse();
+      
+    const currentVersion = sessionData?.current_version || '';
+      
+    if (historicalVersions.length === 0) {
+      return (
+        <div className="flex gap-2">
+          <select
+            className="flex h-8 w-[140px] items-center justify-between rounded-md border border-input bg-background px-3 py-1 text-xs ring-offset-background disabled:opacity-50 shadow-sm"
+            disabled
+          >
+            <option>hola</option>
+          </select>
+        </div>
+      );
+    }
+    
+    return (
+      <div className="flex gap-2">
+        <select
+          className="flex h-8 w-[140px] items-center justify-between rounded-md border border-input bg-background px-3 py-1 text-xs ring-offset-background disabled:opacity-50 shadow-sm"
+          onChange={(e) => {
+            if (e.target.value && e.target.value !== currentVersion) {
+              checkoutMutation.mutate(e.target.value);
+            }
+          }}
+          value={currentVersion}
+          disabled={checkoutMutation.isPending}
+        >
+          <option value="" disabled>Version...</option>
+          {historicalVersions.map((v: any, idx: number) => (
+            <option key={idx} value={v.version}>v{v.version} - {v.name}</option>
+          ))}
+        </select>
+      </div>
+    );
+  };
 
   useEffect(() => {
     setMounted(true)
@@ -36,16 +109,52 @@ export default function Home() {
     try {
       switch (action.type) {
         case 'export':
-          const blob = await apiClient.buildDrawing()
-          const url = URL.createObjectURL(blob)
-          const a = document.createElement('a')
-          a.href = url
-          a.download = 'part-drawing.pdf'
-          document.body.appendChild(a)
-          a.click()
-          document.body.removeChild(a)
-          URL.revokeObjectURL(url)
-          toast.success('PDF drawing downloaded successfully!')
+          if (action.payload?.format === 'dxf' && action.payload?.content) {
+            // Direct Base64 download for DXF
+            const contentDecoded = atob(action.payload.content as string);
+            const blobDxf = new Blob([contentDecoded], { type: 'application/dxf' });
+            const urlDxf = URL.createObjectURL(blobDxf);
+            const aDxf = document.createElement('a');
+            aDxf.href = urlDxf;
+            aDxf.download = 'part-design.dxf';
+            document.body.appendChild(aDxf);
+            aDxf.click();
+            document.body.removeChild(aDxf);
+            URL.revokeObjectURL(urlDxf);
+            toast.success('DXF exported successfully!');
+          } else {
+            // Default to PDF drawing
+            if (!partType || !geometryData) {
+              toast.error('No part generated! Please generate a part before exporting.')
+              return
+            }
+            
+            const matName = material && typeof material === 'object' && 'name' in material 
+                 ? material.name 
+                 : (typeof material === 'string' ? material : 'steel');
+                 
+            const titleBlock = {
+              title: `${partType.toUpperCase()} Design`,
+              drawing_number: `DWG-${Date.now().toString().slice(-4)}`,
+              material: String(matName),
+              thickness: Number(thickness || 5.0)
+            }
+            
+            const blob = await apiClient.buildDrawing({
+               part_type: partType,
+               geometry_data: geometryData,
+               title_block: titleBlock
+            })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = 'part-drawing.pdf'
+            document.body.appendChild(a)
+            a.click()
+            document.body.removeChild(a)
+            URL.revokeObjectURL(url)
+            toast.success('PDF drawing downloaded successfully!')
+          }
           break
         case 'check':
           // Trigger a refetch in the Checks component
@@ -126,37 +235,74 @@ export default function Home() {
 
       {/* Main Content Area */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Pane - Chat */}
-        <div className="w-1/2 flex flex-col border-r">
-          <Chat 
-            onSvgUpdate={handleSvgUpdate} 
-            onActionTrigger={handleActionTrigger}
-          />
-        </div>
-
-        {/* Right Pane - Canvas and Analytics */}
-        <div className="w-1/2 flex flex-col">
-          {/* Canvas */}
-          <div className="flex-1">
-            <Canvas 
-              key={currentSvg ? currentSvg.substring(0, 50) : 'empty'} 
-              svg={currentSvg} 
-              className="h-full" 
+        <ResizablePanelGroup direction="horizontal" className="flex-1">
+          {/* Left Pane - Chat */}
+          <ResizablePanel defaultSize={40} minSize={25} className="flex flex-col border-r">
+            <Chat 
+              onSvgUpdate={handleSvgUpdate} 
+              onActionTrigger={handleActionTrigger}
+              externalIntent={externalIntent}
             />
-          </div>
+          </ResizablePanel>
 
-          {/* Analytics Panel (collapsible) */}
-          {showAnalytics && (
-            <div className="border-t bg-muted/20">
-              <div className="grid grid-cols-2 gap-4 p-4 max-h-96 overflow-y-auto">
-                <Checks className="" trigger={triggerCheck} />
-                <Analysis className="" trigger={triggerAnalysis} />
-                <LCA className="" />
-                <ParetoChart className="" trigger={triggerOptimization} />
+          <ResizableHandle withHandle />
+
+          {/* Right Pane - Canvas and Analytics */}
+          <ResizablePanel defaultSize={60} minSize={30} className="flex flex-col">
+            {showAnalytics ? (
+              <ResizablePanelGroup direction="vertical">
+                {/* Canvas with Toolbar */}
+                <ResizablePanel defaultSize={50} minSize={20} className="flex flex-col flex-1 bg-muted/10">
+                  <div className="h-12 border-b flex flex-none items-center justify-between px-4 bg-background">
+                     <span className="text-sm font-semibold tracking-tight">Design Workspace</span>
+                     {renderVersionDropdown()}
+                  </div>
+                  <div className="relative flex-1 min-h-0">
+                    <Canvas 
+                      key={currentSvg ? currentSvg.substring(0, 50) : 'empty'} 
+                      svg={currentSvg} 
+                      className="h-full" 
+                    />
+                  </div>
+                </ResizablePanel>
+
+                <ResizableHandle withHandle />
+
+                {/* Analytics Panel */}
+                <ResizablePanel defaultSize={50} minSize={20} className="border-t bg-muted/20">
+                  <div className="grid grid-cols-2 gap-4 p-4 h-full overflow-y-auto">
+                    <Checks className="" trigger={triggerCheck} />
+                    <Analysis className="" trigger={triggerAnalysis} />
+                    {process.env.NEXT_PUBLIC_ENABLE_LCA !== 'false' && <LCA className="" />}
+                    <ParetoChart 
+                      className={process.env.NEXT_PUBLIC_ENABLE_LCA === 'false' ? 'col-span-2' : ''} 
+                      trigger={triggerOptimization} 
+                      onApplySolution={(intent: string) => {
+                        setExternalIntent(intent);
+                        // Reset intent after a short delay so the same intent can be applied again
+                        setTimeout(() => setExternalIntent(''), 500);
+                      }}
+                    />
+                  </div>
+                </ResizablePanel>
+              </ResizablePanelGroup>
+            ) : (
+              <div className="flex flex-col flex-1 h-full bg-muted/10">
+                <div className="h-12 border-b flex flex-none items-center justify-between px-4 bg-background">
+                   <span className="text-sm font-semibold tracking-tight">Design Workspace</span>
+                   {renderVersionDropdown()}
+                </div>
+                <div className="relative flex-1 min-h-0">
+                  <Canvas 
+                    key={currentSvg ? currentSvg.substring(0, 50) : 'empty'} 
+                    svg={currentSvg} 
+                    className="h-full" 
+                  />
+                </div>
               </div>
-            </div>
-          )}
-        </div>
+            )}
+          </ResizablePanel>
+        </ResizablePanelGroup>
       </div>
     </div>
   )

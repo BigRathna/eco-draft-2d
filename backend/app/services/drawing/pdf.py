@@ -199,11 +199,11 @@ class PDFDrawingGenerator:
         c.line(dim_x - 2*mm, start_y + drawing_height, dim_x + 2*mm, start_y + drawing_height)
         
         height_text = f"{part_height:.{precision}f}"
-        c.save()
+        c.saveState()
         c.translate(dim_x + 6*mm, start_y + drawing_height / 2)
         c.rotate(90)
         c.drawString(-c.stringWidth(height_text, "Helvetica", 8) / 2, 0, height_text)
-        c.restore()
+        c.restoreState()
         
         # Hole dimensions if present
         params = self.geometry_data.get("parameters", {})
@@ -258,11 +258,16 @@ class PDFDrawingGenerator:
         c.setFont("Helvetica", 10)
         details_y = title_y - 8 * mm
         part_details = [
-            f"Material: {self.title_block.material.value.upper()}",
+            f"Material: {self.title_block.material.value.upper() if hasattr(self.title_block.material, 'value') else self.title_block.material.upper()}",
             f"Thickness: {self.title_block.thickness}mm",
             f"Scale: {self.title_block.scale}",
         ]
         
+        if self.title_block.mass is not None:
+            part_details.append(f"Mass: {self.title_block.mass:.2f} kg")
+        if self.title_block.max_stress is not None:
+            part_details.append(f"Peak Stress: {self.title_block.max_stress:.1f} MPa")
+            
         for i, detail in enumerate(part_details):
             c.drawString(tb_x + 5*mm, details_y - i * 5*mm, detail)
             

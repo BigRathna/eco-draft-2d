@@ -14,19 +14,23 @@ Eco Draft 2D is a comprehensive engineering design platform that helps you creat
 The project consists of a FastAPI backend and a Next.js frontend.
 
 ### Prerequisites
-- Python 3.9+ 
+
+- Python 3.9+
 - Node.js (for frontend development)
 
 ### Quick Start (Backend)
+
 ```bash
 git clone https://github.com/eco-draft/eco-draft-2d.git
 cd eco-draft-2d
 make install
 make dev
 ```
+
 The API runs at `http://localhost:8000` with interactive docs available at `/api/v1/docs`.
 
 ### Quick Start (Frontend)
+
 ```bash
 cd frontend
 npm install
@@ -36,4 +40,5 @@ npm run dev
 For more command options (formatting, linting, testing), run `make help` in the root directory.
 
 ## License
+
 Apache License 2.0

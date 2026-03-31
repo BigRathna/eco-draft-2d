@@ -21,6 +21,8 @@ class TitleBlock(BaseModel):
     approved_by: Optional[str] = Field(None, description="Approved by")
     date: datetime = Field(default_factory=datetime.now, description="Drawing date")
     company: str = Field("", description="Company name")
+    mass: Optional[float] = Field(None, description="Analyzed part mass in kg")
+    max_stress: Optional[float] = Field(None, description="Peak stress in MPa")
     
 
 class DrawingRequest(BaseModel):

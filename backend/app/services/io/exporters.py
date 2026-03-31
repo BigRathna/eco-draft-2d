@@ -133,7 +133,7 @@ class FileExporter:
         
         # Add larger margins for better presentation
         margin = max(width, height) * 0.4  # Increased margin for better spacing
-        svg_width = width + 2 * margin
+        svg_width = max(width + 2 * margin, 250)  # Ensure minimum bounding width for the label block
         svg_height = height + 3 * margin  # Extra space at bottom for labels
         
         # Create SVG drawing with proper viewBox
@@ -321,7 +321,7 @@ class FileExporter:
         # Count actual holes in the geometry
         hole_count = len(holes)
         if hole_count > 0 and hole_diameter is not None and hole_diameter > 0:
-            info_text.append(f"Holes: {hole_count} × Ø{hole_diameter:.1f} mm")
+            info_text.append(f"Holes: {hole_count} x D{hole_diameter:.1f} mm")
         elif hole_count > 0:
             info_text.append(f"Holes: {hole_count}")
         
