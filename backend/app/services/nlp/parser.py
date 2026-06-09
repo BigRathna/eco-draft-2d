@@ -6,10 +6,12 @@ import requests
 import re
 import time
 import threading
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 import json
 from app.core.config import settings
 from app.schemas.cad import CadIntent, CadParameters
+from app.services.nlp.prompt_builder import create_prompt_builder
+from app.services.nlp.adapters import get_adapter
 
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
 
@@ -36,61 +38,17 @@ def _rate_limit() -> None:
             time.sleep(wait)
         _last_call_time = time.monotonic()
 
-SYSTEM_PROMPT = (
-    "You are an expert mechanical engineering assistant. "
-    "Given a user's request, extract the part type and parameters. "
-    "\n\n"
-    "IMPORTANT: If the message contains context in brackets like [Current part: ...], this is a MODIFICATION request. "
-    "For modifications:\n"
-    "1. Keep the same part_type from the context\n"
-    "2. Start with the current parameters from context\n"
-    "3. Apply the requested changes\n"
-    "4. Return the complete updated parameters\n"
-    "\n\n"
-    "Examples of modification requests:\n"
-    "- 'make it bigger' -> increase width and height by 20-50%\n"
-    "- 'make the sides even' -> set width = height\n"
-    "- 'increase thickness to 10mm' -> set thickness = 10\n"
-    "- 'add more holes' -> increase number of holes or adjust hole pattern\n"
-    "- 'make it smaller' -> decrease dimensions by 20-30%\n"
-    "\n\n"
-    "SUPPORTED PART TYPES:\n"
-    "- gusset (triangular reinforcement)\n"
-    "- bracket (L-shaped or T-shaped support)\n"
-    "- plate (rectangular base)\n"
-    "- washer, flange, spacer, etc.\n"
-    "\n\n"
-    "PARAMETERS to extract/modify (use exact standard names): \n"
-    "- Dimensions: width, height, length, diameter, thickness\n"
-    "- Features: hole_diameter, hole_spacing, corner_radius, hole_count, number_of_holes\n"
-    "- Material: steel, aluminum, brass, titanium\n"
-    "- Shape: triangle, L, T, rectangle, circle\n"
-    "\n\n"
-    "Reply ONLY with a valid JSON object matching exactly this schema:\n"
-    "{\n"
-    "  \"action\": \"create\", // Use 'checkout' if the user wants to revert to an older historical state\n"
-    "  \"target_event_id\": \"\", // Fill this ONLY if action is 'checkout', using the 8-char ID from history\n"
-    "  \"part_type\": \"[derive from context or history]\",\n"
-    "  \"parameters\": {\n"
-    "    \"material\": \"steel\",\n"
-    "    \"thickness\": 5,\n"
-    "    \"width\": 100,\n"
-    "    \"height\": 100,\n"
-    "    \"shape\": \"triangle\"\n"
-    "  },\n"
-    "  \"export_formats\": [\"svg\", \"dxf\"]\n"
-    "}\n"
-)
-
 
 def _call_gemini(system_prompt: str, user_message: str) -> Dict[str, Any]:
-    from app.core.config import settings
     if not getattr(settings, "gemini_api_key", None):
         raise RuntimeError("GEMINI_API_KEY environment variable not set.")
     
     headers = {"Content-Type": "application/json"}
+    # Gemini tool use works best with the system prompt followed by user message
+    combined_content = system_prompt + "\n\n" + user_message
+    
     data = {
-        "contents": [{"role": "user", "parts": [{"text": system_prompt + "\n" + user_message}]}],
+        "contents": [{"role": "user", "parts": [{"text": combined_content}]}],
         "tools": [{"function_declarations": [{
             "name": "engineering_part",
             "description": "Extracted engineering part request",
@@ -133,14 +91,13 @@ def _call_gemini(system_prompt: str, user_message: str) -> Dict[str, Any]:
             
     raise ValueError("Gemini failed to return valid JSON.")
 
-def _call_openai_compatible(system_prompt: str, user_message: str, provider: str) -> Dict[str, Any]:
+def _call_openai_compatible(payload: Any, provider: str) -> Dict[str, Any]:
     if provider == "ollama":
         url = "http://localhost:11434/v1/chat/completions"
         headers = {"Content-Type": "application/json"}
         model = "llama3"
     else:
         url = "https://openrouter.ai/api/v1/chat/completions"
-        from app.core.config import settings
         headers = {
             "Authorization": f"Bearer {getattr(settings, 'openrouter_api_key', '')}",
             "HTTP-Referer": "http://localhost:3000",
@@ -148,14 +105,9 @@ def _call_openai_compatible(system_prompt: str, user_message: str, provider: str
         }
         model = "meta-llama/llama-3-8b-instruct"
 
-    system_prompt += "\n\nCRITICAL: Return ONLY raw JSON matching this schema: {\"action\": string, \"target_event_id\": string, \"part_type\": string, \"parameters\": {}, \"export_formats\": []}"
-    
     data = {
         "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message}
-        ],
+        "messages": payload,
         "response_format": {"type": "json_object"}
     }
     
@@ -171,34 +123,37 @@ def parse_engineering_request(user_message: str, provider: str = "gemini") -> Ca
     from app.services.session.store import tracker
     print(f"🤖 NLP: Processing user message via {provider.upper()}: '{user_message}'")
     
+    # Identify if this is a modification (check history)
     session_history = tracker.get_context_summary()
-    dynamic_prompt = SYSTEM_PROMPT + f"\n\n==== ACTIVE SESSION GRAPH HISTORY ====\n{session_history if session_history else 'No history yet. This is the first action.'}\n======================================\n\nAnalyze the user message. If they ask to 'go back' or 'return' to an older design, extract the matching ID from the history, set action='checkout', and populate the parameters exactly as they were in that historical node!"
+    is_mod = "[Current part:" in user_message or (session_history is not None and "Created" in session_history)
+    
+    # 1. Build the canonical bundle
+    builder = create_prompt_builder(
+        is_modification=is_mod,
+        session_history=session_history
+    )
+    bundle = builder.build_bundle()
+    
+    # 2. Log version for future traceability
+    print(f"🔍 NLP: Prompt Version Hash: {bundle.version_hash}")
+    
+    # 3. Transform via Adapter and Call Provider
+    adapter = get_adapter(provider)
+    payload = adapter.transform(bundle, user_message)
     
     if provider in ["ollama", "openrouter"]:
-        parsed = _call_openai_compatible(dynamic_prompt, user_message, provider)
+        parsed = _call_openai_compatible(payload, provider)
     else:
-        parsed = _call_gemini(dynamic_prompt, user_message)
+        parsed = _call_gemini(payload, user_message)
         
-    if "action" not in parsed or parsed["action"] == "generate":
-        parsed["action"] = "create"
-        
-    part_type = parsed.get("part_type", "plate").lower()
-    parameters = parsed.get("parameters", {})
-    action = parsed.get("action", "create")
-    target_id = parsed.get("target_event_id")
-    rationale = parsed.get("rationale")
+    # 4. Extract intent from provider result
+    raw_intent = adapter.extract_intent(parsed)
     
-    defaults = _get_part_type_defaults(part_type)
-    for key, val in defaults.items():
-        if key not in parameters:
-            parameters[key] = val
-            
-    return CadIntent(
-        action=action,
-        target_id=target_id,
-        parameters=CadParameters(type=part_type, values=parameters),
-        rationale=rationale
-    )
+    # 5. Normalize and Validate (Phase 2 hardening)
+    from .normalization import build_validated_intent
+    intent = build_validated_intent(raw_intent)
+    
+    return intent
 
 
 def apply_parameter_defaults(parsed_data: Dict[str, Any]) -> Dict[str, Any]:

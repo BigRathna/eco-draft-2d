@@ -328,12 +328,8 @@ export function Chat({ onSvgUpdate, onActionTrigger, externalIntent }: ChatProps
       // Add to conversation history
       addToHistory(input.trim())
       
-      // Parse the user message using NLP/LLM, appending material if set
-      let promptToParse = messageText;
-      if (selectedMaterial !== 'auto') {
-         promptToParse += `. The material MUST be ${selectedMaterial}.`;
-      }
-      const parsed = await parseChatMessage(promptToParse, selectedLlm)
+      // Parse the user message using NLP/LLM
+      const parsed = await parseChatMessage(messageText, selectedLlm)
       
       console.log('Parsed message:', parsed);
       
